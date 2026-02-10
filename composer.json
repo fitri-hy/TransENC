@@ -1,0 +1,40 @@
+{
+    "name": "fhylabs/transenc",
+    "description": "Ultimate Laravel Encrypted Transport: End-to-end encryption for request and response, multi-tenant ready, enterprise-grade.",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Fitri HY",
+            "email": "fhy@fhylabs.com"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0 || ^11.0 || ^12.0",
+        "illuminate/http": "^10.0 || ^11.0 || ^12.0",
+        "illuminate/console": "^10.0 || ^11.0 || ^12.0",
+        "illuminate/routing": "^10.0 || ^11.0 || ^12.0",
+        "illuminate/cache": "^10.0 || ^11.0 || ^12.0",
+		"phpseclib/phpseclib": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "TransENC\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "TransENC\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "TransENC\\Providers\\EncryptedTransportServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
