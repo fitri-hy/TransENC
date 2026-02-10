@@ -8,7 +8,7 @@ use TransENC\Exceptions\EncryptionException;
 
 class EncryptResponse
 {
-    protected $encryptionService;
+    protected EncryptionService $encryptionService;
 
     public function __construct(EncryptionService $encryptionService)
     {
@@ -28,7 +28,7 @@ class EncryptResponse
                 $encrypted = $this->encryptionService->encrypt($payload);
                 $response->setContent($encrypted);
             } catch (\Exception $e) {
-                throw new EncryptionException();
+                throw new EncryptionException($e->getMessage());
             }
         }
 

@@ -6,8 +6,9 @@
 
 * AES-256-GCM for payload encryption
 * RSA-2048 / RSA-4096 for key exchange
-* Payload signing for integrity & authentication
-* Replay attack protection using nonce
+* Payload signing for integrity & authentication (HMAC SHA256)
+* Replay attack protection using nonce (auto generated & validated)
+* Automatic payload encryption/decryption + nonce/signature management
 * Artisan commands for key lifecycle management
 * Fully integrated with Laravel Service Container
 
@@ -58,7 +59,7 @@ php artisan vendor:publish --provider="TransENC\Providers\EncryptedTransportServ
 The config file will be available at:
 
 ```bash
-config/transenc.php
+config/encrypted_transport.php
 ```
 
 ## Key Management
@@ -83,20 +84,22 @@ php artisan transenc:rotate-keys
 
 > Old keys remain valid during the grace period (configurable).
 
-### Encrypt Payload
+### Encrypt Payload (CLI)
 
 ```bash
 php artisan transenc:encrypt-payload testclient '{"foo":"bar"}'
 ```
 
+---
+
 ## API Reference
 
 ### Encryption Service
 
-| Method    | Parameters                                       | Return   | Description                                                                                |
-| --------- | ------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------ |
-| `encrypt` | `string $payload`<br>`string $clientId`          | `string` | Encrypts JSON payload using **AES** and secures the key with the client **RSA public key** |
-| `decrypt` | `string $encryptedPayload`<br>`string $clientId` | `string` | Decrypts the payload using the server **RSA private key**, then decrypts the AES payload   |
+| Method    | Parameters                                              | Return   | Description                                                                                                                                      |
+| --------- | ------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `encrypt` | `string $payload`<br>`string $clientId = null`          | `string` | Encrypts JSON payload using **AES-GCM** and secures the key with the client **RSA public key**. Automatically attaches nonce and HMAC signature. |
+| `decrypt` | `string $encryptedPayload`<br>`string $clientId = null` | `string` | Decrypts the payload using the server **RSA private key**, validates AES payload, HMAC signature, and nonce.                                     |
 
 ### Payload Signer
 
@@ -107,9 +110,10 @@ php artisan transenc:encrypt-payload testclient '{"foo":"bar"}'
 
 ### Nonce Manager
 
-| Method   | Parameters      | Return | Description                                                     |
-| -------- | --------------- | ------ | --------------------------------------------------------------- |
-| `verify` | `string $nonce` | `bool` | Ensures a nonce is used **only once** to prevent replay attacks |
+| Method     | Parameters         | Return   | Description                                                     |
+| ---------- | ------------------ | -------- | --------------------------------------------------------------- |
+| `generate` | `int $length = 16` | `string` | Generates a secure nonce for replay protection                  |
+| `verify`   | `string $nonce`    | `bool`   | Ensures a nonce is used **only once** to prevent replay attacks |
 
 ### Artisan Commands
 
@@ -119,127 +123,80 @@ php artisan transenc:encrypt-payload testclient '{"foo":"bar"}'
 | `transenc:rotate-keys`     | –                   | Securely rotate encryption keys    |
 | `transenc:encrypt-payload` | `{clientId} {json}` | Test payload encryption via CLI    |
 
+---
+
 ## Example of Use
 
-#### Server Side
+#### Server Side (Laravel Controller / Route)
 
 ```php
 use TransENC\Services\EncryptionService;
-use TransENC\Services\PayloadSigner;
-use TransENC\Services\NonceManager;
 
-$clientId  = 'testclient';
 $encryptor = app(EncryptionService::class);
-$signer    = app(PayloadSigner::class);
 
 /*
 |--------------------------------------------------------------------------
 | 1. Decrypt Incoming Payload
+|    (auto validates nonce & signature)
 |--------------------------------------------------------------------------
 */
-$payload = json_decode(
-    $encryptor->decrypt($encryptedPayload, $clientId),
-    true
-);
+$payload = json_decode($encryptor->decrypt($encryptedPayload), true);
 
 /*
 |--------------------------------------------------------------------------
-| 2. Verify Signature
+| 2. Prepare Response
 |--------------------------------------------------------------------------
 */
-if (!$signer->verify(json_encode($payload), $signature, $clientId)) {
-    abort(401, 'Invalid signature');
-}
-
-/*
-|--------------------------------------------------------------------------
-| 3. Verify Nonce (Anti Replay)
-|--------------------------------------------------------------------------
-*/
-if (!NonceManager::verify($payload['nonce'])) {
-    abort(409, 'Replay attack detected');
-}
-
-/*
-|--------------------------------------------------------------------------
-| 4. Prepare Response
-|--------------------------------------------------------------------------
-*/
-$response = json_encode([
+$response = [
     'status' => 'success',
     'data'   => $payload,
-    'nonce'  => bin2hex(random_bytes(16)),
-]);
+];
 
-/*
-|--------------------------------------------------------------------------
-| 5. Encrypt Response
-|--------------------------------------------------------------------------
-*/
-return $encryptor->encrypt($response, $clientId);
+return $encryptor->encrypt(json_encode($response));
 ```
 
 #### Client Side
 
 ```php
 use TransENC\Services\EncryptionService;
-use TransENC\Services\PayloadSigner;
 
-$clientId  = 'testclient';
 $encryptor = app(EncryptionService::class);
-$signer    = app(PayloadSigner::class);
 
 /*
 |--------------------------------------------------------------------------
-| 1. Create Payload + Nonce
+| 1. Prepare Payload
+|    (nonce and signature auto-generated)
 |--------------------------------------------------------------------------
 */
 $payload = [
-    'name'  => 'FHY',
-    'role'  => 'admin',
-    'time'  => time(),
-    'nonce' => bin2hex(random_bytes(16)),
+    'name' => 'FHY',
+    'role' => 'admin',
+    'time' => time(),
 ];
 
-$jsonPayload = json_encode($payload);
+$encryptedPayload = $encryptor->encrypt(json_encode($payload));
 
 /*
 |--------------------------------------------------------------------------
-| 2. Sign Payload
-|--------------------------------------------------------------------------
-*/
-$signature = $signer->sign($jsonPayload, $clientId);
-
-/*
-|--------------------------------------------------------------------------
-| 3. Encrypt Payload
-|--------------------------------------------------------------------------
-*/
-$encryptedPayload = $encryptor->encrypt($jsonPayload, $clientId);
-
-/*
-|--------------------------------------------------------------------------
-| 4. Send Request
+| 2. Send Request
 |--------------------------------------------------------------------------
 */
 $request = [
-    'client_id' => $clientId,
+    'client_id' => 'testclient',
     'payload'   => $encryptedPayload,
-    'signature' => $signature,
 ];
 
 /*
 |--------------------------------------------------------------------------
-| 5. Decrypt Response
+| 3. Receive & Decrypt Response
 |--------------------------------------------------------------------------
 */
-$response = json_decode(
-    $encryptor->decrypt($encryptedResponse, $clientId),
-    true
-);
+$response = json_decode($encryptor->decrypt($encryptedResponse), true);
 ```
 
-> See complete usage examples: [tests/examples.php](./tests/examples.php)
+> Developer **does not need to manage nonce or signature manually**. Everything is handled automatically by the library.
+
+---
 
 ## Folder Structure
 
@@ -281,3 +238,177 @@ TransENC/
 │
 └── composer.json
 ```
+
+---
+
+## Best Practices for Production
+
+This section explains **best practices** when using **TransENC** in production or enterprise environments.
+Following this guide ensures **confidentiality, integrity, replay protection (nonce), and operational security**.
+
+#### Always Use HTTPS (TLS)
+
+Even though TransENC provides **payload encryption**, **HTTPS must still be used**.
+
+**Reasons:**
+
+* Prevents traffic metadata leakage
+* Protects against downgrade or routing attacks
+* Secures authentication headers and routing information
+
+> TransENC **complements TLS**, it does not replace it.
+
+#### Protect Server Private Keys
+
+The server RSA private key is the **root of trust**.
+
+**Recommended practices:**
+
+* Store keys outside the public directory
+* Restrict file permissions:
+
+  ```bash
+  chmod 600 storage/transenc/keys/*.pem
+  ```
+* Do not commit keys to version control
+* Use separate keys for dev / staging / prod
+
+#### Enable Key Rotation
+
+Key rotation limits the impact if a key is compromised.
+
+Recommended configuration:
+
+```php
+'key_rotation' => [
+    'enabled' => true,
+    'grace_period' => 3600, // 1 hour
+],
+```
+
+**Mechanism:**
+
+* New keys are used for encryption
+* Old keys remain valid for decryption during the grace period
+* No downtime during rotation
+
+#### Do Not Disable Nonce Validation
+
+Nonce validation protects against **replay attacks**, critical for:
+
+* Financial transactions
+* Payment systems
+* Authentication APIs
+
+**Best practices:**
+
+* Each request must have a unique nonce
+* Nonce storage must be atomic (Redis SETNX / DB unique index)
+* Short TTL is recommended (2–5 minutes)
+
+> Disabling nonce in production is **strongly discouraged**.
+
+#### Do Not Log Plaintext Payloads
+
+Avoid logging:
+
+* Decrypted payloads
+* AES / RSA private keys
+* Signatures related to plaintext
+
+**Safe logging:**
+
+* Client ID
+* Request ID
+* Timestamp
+* Encryption metadata (without payload)
+
+Example:
+
+```text
+[OK] Encrypted request received from client=testclient
+```
+
+#### Treat Decryption Failures as Security Events
+
+`DecryptionException` may indicate:
+
+* Manipulated payload
+* Invalid signature
+* Replay attack
+* Wrong client key
+
+**Recommended actions:**
+
+* Return generic error messages
+* Log events internally
+* Do not disclose cryptographic details to the client
+
+#### Separate Client and Server Keys
+
+Each client **must have its own key pair**.
+
+**Do not:**
+
+* Share keys between clients
+* Use the same key across different environments
+* Allow clients to upload their own private keys
+
+Benefits:
+
+* Client isolation
+* Limits compromise impact
+* Easier key revocation
+
+#### Validate Business Logic After Decryption
+
+TransENC only secures **transport and integrity**, not business rules.
+
+Always validate:
+
+* Transaction amounts
+* User access rights
+* Idempotency keys
+* Request timestamps
+
+Security ≠ business correctness.
+
+#### Use Middleware for Consistency
+
+For APIs, use:
+
+* `DecryptRequest` middleware
+* `EncryptResponse` middleware
+
+Benefits:
+
+* Consistent encryption enforcement
+* Reduces developer mistakes
+* Centralizes security logic
+
+#### Separate Environments
+
+Always separate:
+
+* Keys
+* Client IDs
+* Configurations
+
+Across environments:
+
+* Local
+* Staging
+* Production
+
+Do not use production keys in other environments.
+
+#### Security Model Summary
+
+| Layer       | Responsibility                 |
+| ----------- | ------------------------------ |
+| TLS         | Network security               |
+| TransENC    | Payload encryption & integrity |
+| Nonce       | Replay protection              |
+| Application | Authorization & business logic |
+
+TransENC follows **defense-in-depth**, meaning security does not rely on a single layer.

@@ -8,7 +8,7 @@ use TransENC\Exceptions\DecryptionException;
 
 class DecryptRequest
 {
-    protected $encryptionService;
+    protected EncryptionService $encryptionService;
 
     public function __construct(EncryptionService $encryptionService)
     {
@@ -18,13 +18,12 @@ class DecryptRequest
     public function handle($request, Closure $next)
     {
         if ($request->isJson() && $request->header('X-Encrypted', false)) {
-            $payload = $request->getContent();
-
             try {
+                $payload = $request->getContent();
                 $decrypted = $this->encryptionService->decrypt($payload);
                 $request->replace(json_decode($decrypted, true));
             } catch (\Exception $e) {
-                throw new DecryptionException();
+                throw new DecryptionException($e->getMessage());
             }
         }
 

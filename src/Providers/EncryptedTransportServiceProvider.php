@@ -15,15 +15,10 @@ class EncryptedTransportServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../Config/encrypted_transport.php', 'encrypted_transport');
 
-        $this->app->singleton('TransENC\Services\KeyManager', function ($app) {
-            return new \TransENC\Services\KeyManager();
-        });
-
-        $this->app->singleton('TransENC\Services\EncryptionService', function ($app) {
-            return new \TransENC\Services\EncryptionService(
-                $app->make('TransENC\Services\KeyManager')
-            );
-        });
+        $this->app->singleton('TransENC\Services\KeyManager', fn($app) => new \TransENC\Services\KeyManager());
+        $this->app->singleton('TransENC\Services\EncryptionService', fn($app) =>
+            new \TransENC\Services\EncryptionService($app->make('TransENC\Services\KeyManager'))
+        );
 
         if ($this->app->runningInConsole()) {
             $this->commands([
@@ -46,7 +41,6 @@ class EncryptedTransportServiceProvider extends ServiceProvider
         if ($config['decrypt_request'] ?? false) {
             $router->aliasMiddleware('transenc.decrypt', DecryptRequest::class);
         }
-
         if ($config['encrypt_response'] ?? false) {
             $router->aliasMiddleware('transenc.encrypt', EncryptResponse::class);
         }

@@ -6,18 +6,18 @@ return [
     |--------------------------------------------------------------------------
     | Encryption Algorithm
     |--------------------------------------------------------------------------
-    | AES for payload, RSA/ECC for key exchange
+    | AES-GCM untuk payload, RSA-2048 untuk key exchange
     */
-    'payload_algorithm' => 'AES-256-CBC',
-    'key_algorithm' => 'RSA-2048',
+    'payload_algorithm' => 'AES-256-GCM', // another option: AES-128-GCM, AES-192-GCM
+    'key_algorithm' => 'RSA-2048',        // another option: RSA-4096, ECC-256
 
     /*
     |--------------------------------------------------------------------------
     | Key Storage
     |--------------------------------------------------------------------------
-    | Can be file system, database, or external KMS
+    | Pilihan: file (default), db, vault/KMS
     */
-    'key_storage' => env('TRANSENC_KEY_STORAGE', 'file'), // options: file, db, vault
+    'key_storage' => env('TRANSENC_KEY_STORAGE', 'file'),
 
     /*
     |--------------------------------------------------------------------------
@@ -30,7 +30,7 @@ return [
     |--------------------------------------------------------------------------
     | Middleware
     |--------------------------------------------------------------------------
-    | Enable/disable request and response encryption middleware
+    | Enable request/response encryption middleware
     */
     'middleware' => [
         'decrypt_request' => true,
@@ -41,7 +41,29 @@ return [
     |--------------------------------------------------------------------------
     | Logging
     |--------------------------------------------------------------------------
-    | Enable logging of encrypted payload metadata (never log plaintext)
+    | Log metadata payload (never log plaintext)
     */
     'logging' => true,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Key Rotation Options
+    |--------------------------------------------------------------------------
+    | Grace period in seconds for old keys
+    */
+    'key_rotation' => [
+        'enabled' => true,
+        'grace_period' => 3600, // 1 hour
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Nonce Options
+    |--------------------------------------------------------------------------
+    | Expiry time in seconds
+    */
+    'nonce' => [
+        'length' => 16,   // 16 bytes = 32 hex chars
+        'ttl'    => 300,  // valid for 5 minutes
+    ],
 ];
