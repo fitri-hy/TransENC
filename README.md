@@ -90,8 +90,6 @@ php artisan transenc:rotate-keys
 php artisan transenc:encrypt-payload testclient '{"foo":"bar"}'
 ```
 
----
-
 ## API Reference
 
 ### Encryption Service
@@ -123,14 +121,13 @@ php artisan transenc:encrypt-payload testclient '{"foo":"bar"}'
 | `transenc:rotate-keys`     | –                   | Securely rotate encryption keys    |
 | `transenc:encrypt-payload` | `{clientId} {json}` | Test payload encryption via CLI    |
 
----
-
 ## Example of Use
 
 #### Server Side (Laravel Controller / Route)
 
 ```php
 use TransENC\Services\EncryptionService;
+use TransENC\Exceptions\DecryptionException;
 
 $encryptor = app(EncryptionService::class);
 
@@ -140,7 +137,11 @@ $encryptor = app(EncryptionService::class);
 |    (auto validates nonce & signature)
 |--------------------------------------------------------------------------
 */
-$payload = json_decode($encryptor->decrypt($encryptedPayload), true);
+try {
+    $payload = json_decode($encryptor->decrypt($encryptedPayload), true);
+} catch (DecryptionException $e) {
+    abort(400, 'Invalid payload');
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -152,7 +153,15 @@ $response = [
     'data'   => $payload,
 ];
 
-return $encryptor->encrypt(json_encode($response));
+/*
+|--------------------------------------------------------------------------
+| 3. Encrypt Response
+|    (nonce & signature auto-added)
+|--------------------------------------------------------------------------
+*/
+$encryptedResponse = $encryptor->encrypt(json_encode($response));
+
+return $encryptedResponse;
 ```
 
 #### Client Side
@@ -169,9 +178,17 @@ $encryptor = app(EncryptionService::class);
 |--------------------------------------------------------------------------
 */
 $payload = [
-    'name' => 'FHY',
-    'role' => 'admin',
-    'time' => time(),
+    'transaction_id' => 'TXN-' . strtoupper(bin2hex(random_bytes(5))),
+    'user_id'        => 12345,
+    'amount'         => 150000.75,
+    'currency'       => 'IDR',
+    'type'           => 'payment',
+    'status'         => 'pending',
+    'created_at'     => now()->toDateTimeString(),
+    'metadata'       => [
+        'ip_address' => request()->ip(),
+        'user_agent' => request()->userAgent(),
+    ],
 ];
 
 $encryptedPayload = $encryptor->encrypt(json_encode($payload));
@@ -189,14 +206,13 @@ $request = [
 /*
 |--------------------------------------------------------------------------
 | 3. Receive & Decrypt Response
+|    (auto validates nonce & signature)
 |--------------------------------------------------------------------------
 */
 $response = json_decode($encryptor->decrypt($encryptedResponse), true);
 ```
 
 > Developer **does not need to manage nonce or signature manually**. Everything is handled automatically by the library.
-
----
 
 ## Folder Structure
 

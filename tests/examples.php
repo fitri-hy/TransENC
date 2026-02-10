@@ -2,87 +2,86 @@
 
 use Illuminate\Support\Facades\Route;
 use TransENC\Services\EncryptionService;
-use TransENC\Services\NonceManager;
-use TransENC\Services\PayloadSigner;
+use TransENC\Exceptions\DecryptionException;
 
 Route::get('/transenc-full-test', function () {
 
     $clientId = 'testclient';
     $encryptor = app(EncryptionService::class);
 
-    /* ------------------------------
-       STEP 1 — Original Payload
-    ------------------------------ */
-    $payload = [
-        'name' => 'FHY',
-        'role' => 'admin',
-        'time' => now()->timestamp,
+    /*
+    |--------------------------------------------------------------------------
+    | CLIENT SIDE — Prepare Payload
+    |--------------------------------------------------------------------------
+    */
+    $clientPayload = [
+        'transaction_id' => 'TXN-' . strtoupper(bin2hex(random_bytes(5))),
+        'user_id'        => 12345,
+        'amount'         => 150000.75,
+        'currency'       => 'IDR',
+        'type'           => 'payment',
+        'status'         => 'pending',
+        'created_at'     => now()->toDateTimeString(),
+        'metadata'       => [
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->userAgent(),
+        ],
     ];
 
-    /* ------------------------------
-       STEP 2 — Encrypt Payload
-       (auto nonce + auto HMAC signature)
-    ------------------------------ */
-    $encryptedPayload = $encryptor->encrypt(json_encode($payload), $clientId);
+    // Encrypt payload (client adds nonce & signature automatically)
+    $encryptedPayload = $encryptor->encrypt(json_encode($clientPayload), $clientId);
+    $encryptedPayloadData = json_decode($encryptedPayload, true);
 
-    /* ------------------------------
-       STEP 3 — Decrypt Payload
-       (auto validate nonce + signature)
-    ------------------------------ */
-    $decryptedPayload = json_decode($encryptor->decrypt($encryptedPayload, $clientId), true);
-
-    /* ------------------------------
-       STEP 4 — Extract Nonce & Signature
-    ------------------------------ */
-    $payloadData = json_decode($encryptedPayload, true);
-    $nonce = $payloadData['nonce'] ?? null;
-    $signature = $payloadData['signature'] ?? null;
-
-    /* ------------------------------
-       STEP 5 — Verify Signature
-    ------------------------------ */
-    $signatureValid = false;
-    if ($signature) {
-        $signatureValid = PayloadSigner::verify($payloadData['payload'], $signature, $encryptor->getTemporaryKeyFromEncrypted($payloadData['key'], $clientId));
+    /*
+    |--------------------------------------------------------------------------
+    | SERVER SIDE — Receive & Decrypt Payload
+    |--------------------------------------------------------------------------
+    */
+    try {
+        $serverDecryptedPayload = json_decode($encryptor->decrypt($encryptedPayload, $clientId), true);
+        $serverSignatureValid = true;
+        $serverNonceValid = true;
+    } catch (DecryptionException $e) {
+        $serverDecryptedPayload = null;
+        $serverSignatureValid = false;
+        $serverNonceValid = false;
     }
 
-    /* ------------------------------
-       STEP 6 — Validate Nonce
-    ------------------------------ */
-    $nonceValid = $nonce ? NonceManager::verify($nonce) : null;
-
-    /* ------------------------------
-       STEP 7 — Prepare Response Payload
-    ------------------------------ */
-    $responsePayload = [
-        'status' => 'success',
-        'received' => $decryptedPayload,
+    // Server prepares response payload
+    $serverResponsePayload = [
+        'status'   => 'success',
+        'received' => $serverDecryptedPayload,
     ];
 
-    /* ------------------------------
-       STEP 8 — Encrypt Response
-       (auto nonce + signature)
-    ------------------------------ */
-    $encryptedResponse = $encryptor->encrypt(json_encode($responsePayload), $clientId);
+    // Encrypt response (server adds nonce & signature automatically)
+    $encryptedResponse = $encryptor->encrypt(json_encode($serverResponsePayload), $clientId);
+    $encryptedResponseData = json_decode($encryptedResponse, true);
 
-    /* ------------------------------
-       STEP 9 — Decrypt Response
-    ------------------------------ */
-    $decryptedResponse = json_decode($encryptor->decrypt($encryptedResponse, $clientId), true);
+    /*
+    |--------------------------------------------------------------------------
+    | CLIENT SIDE — Decrypt Response
+    |--------------------------------------------------------------------------
+    */
+    try {
+        $clientDecryptedResponse = json_decode($encryptor->decrypt($encryptedResponse, $clientId), true);
+    } catch (DecryptionException $e) {
+        $clientDecryptedResponse = null;
+    }
 
-    /* ------------------------------
-       STEP 10 — Return Debug Output
-    ------------------------------ */
+    // Return full debug output
     return response()->json([
-        'original_payload'       => $payload,
-        'encrypted_payload'      => $encryptedPayload,
-        'decrypted_payload'      => $decryptedPayload,
-        'nonce'                  => $nonce,
-        'signature'              => $signature,
-        'signature_valid'        => $signatureValid,
-        'nonce_valid'            => $nonceValid,
-        'response_payload'       => $responsePayload,
-        'encrypted_response'     => $encryptedResponse,
-        'decrypted_response'     => $decryptedResponse,
+        // Client -> Server
+        'client_original_payload'   => $clientPayload,
+        'client_encrypted_payload'  => $encryptedPayloadData,
+
+        // Server -> Client
+        'server_decrypted_payload'  => $serverDecryptedPayload,
+        'server_signature_valid'    => $serverSignatureValid,
+        'server_nonce_valid'        => $serverNonceValid,
+        'server_response_payload'   => $serverResponsePayload,
+        'server_encrypted_response' => $encryptedResponseData,
+
+        // Client receives response
+        'client_decrypted_response' => $clientDecryptedResponse,
     ]);
 });
