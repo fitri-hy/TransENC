@@ -123,7 +123,7 @@ php artisan transenc:encrypt-payload testclient '{"foo":"bar"}'
 
 #### Server Side
 
-```
+```php
 use TransENC\Services\EncryptionService;
 use TransENC\Services\PayloadSigner;
 use TransENC\Services\NonceManager;
@@ -181,7 +181,7 @@ return $encryptor->encrypt($response, $clientId);
 
 #### Client Side
 
-```
+```php
 use TransENC\Services\EncryptionService;
 use TransENC\Services\PayloadSigner;
 
@@ -243,7 +243,7 @@ $response = json_decode(
 
 ## Folder Structure
 
-```
+```bash
 TransENC/
 │
 ├── src/
